@@ -1,0 +1,91 @@
+name: Deploy Strapi to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Strapi
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r build deploy/
+          cp -r config deploy/
+          cp -r database deploy/
+          cp -r public deploy/
+          cp -r src deploy/
+          cp package*.json deploy/
+          cp .env.production.example deploy/.env.example
+
+          # Create a production-ready package
+          cd deploy
+          tar -czf ../deployment.tar.gz .
+
+      - name: Deploy to server via SFTP
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          server: ${{ secrets.SFTP_HOST }}
+          username: ${{ secrets.SFTP_USERNAME }}
+          password: ${{ secrets.SFTP_PASSWORD }}
+          local_path: './deployment.tar.gz'
+          remote_path: '/var/www/vhosts/darshanagalketayam.lk/api.darshanagalketayam.lk/'
+          sftp_only: true
+
+      - name: Extract and setup on server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SFTP_HOST }}
+          username: ${{ secrets.SFTP_USERNAME }}
+          password: ${{ secrets.SFTP_PASSWORD }}
+          script: |
+            cd /var/www/vhosts/darshanagalketayam.lk/api.darshanagalketayam.lk/
+
+            # Backup current deployment
+            if [ -d "current" ]; then
+              mv current backup_$(date +%Y%m%d_%H%M%S)
+            fi
+
+            # Extract new deployment
+            tar -xzf deployment.tar.gz -C .
+            rm deployment.tar.gz
+
+            # Install production dependencies
+            npm ci --production
+
+            # Restart package manager and Strapi
+            pm2 delete strapi || true
+            pm2 start npm --name "strapi" -- start
+            pm2 save
+
+            # Keep only last 3 backups
+            ls -t | grep backup_ | tail -n +4 | xargs -r rm -rf
+
+      - name: Deployment status
+        if: success()
+        run: echo "✅ Deployment successful!"
+
+      - name: Deployment failed
+        if: failure()
+        run: echo "❌ Deployment failed!"
