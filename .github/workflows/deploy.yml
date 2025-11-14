@@ -31,13 +31,18 @@ jobs:
       - name: Create deployment package
         run: |
           mkdir -p deploy
-          cp -r build deploy/
+
+          # Copy Strapi build output and necessary files
+          [ -d ".strapi" ] && cp -r .strapi deploy/ || echo "No .strapi directory"
+          [ -d "dist" ] && cp -r dist deploy/ || echo "No dist directory"
           cp -r config deploy/
           cp -r database deploy/
           cp -r public deploy/
           cp -r src deploy/
           cp package*.json deploy/
-          cp .env.production.example deploy/.env.example
+
+          # Copy .env.example if it exists
+          [ -f ".env.production.example" ] && cp .env.production.example deploy/.env.example || echo "No .env.production.example"
 
           # Create a production-ready package
           cd deploy
